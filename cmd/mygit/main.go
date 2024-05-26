@@ -3,23 +3,20 @@ package main
 import (
 	"bytes"
 	"compress/zlib"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strconv"
-
 )
 
 // Usage: your_git.sh <command> <arg1> <arg2> ...
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Println("Logs from your program will appear here!")
 
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: mygit <command> [<args>...]\n")
 		os.Exit(1)
 	}
-
 
 	switch command := os.Args[1]; command {
 	case "init":
@@ -29,12 +26,19 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("Initialized git directory")
-	case "cat-file": 
-		if len(os.Args) < 3 {
-			fmt.Fprintf(os.Stderr, "useage: mygit cat-file <object>")
+	case "cat-file":
+		flagSet := flag.NewFlagSet("cat-file", flag.ExitOnError)
+		printObjContent := flagSet.Bool("p", false, "pretty print (-e | -p) <object> content")
+		checkObjExist := flagSet.Bool("e", false, "check if <object> exists")
+		if *printObjContent && *checkObjExist || !(*printObjContent && *checkObjExist) {
+			fmt.Fprintf(os.Stderr, "useage: mygit cat-file (-e | -p) <object>")
 			os.Exit(1)
 		}
-		checksum := os.Args[2] 
+		if flagSet.Arg(0) != "" {
+			fmt.Fprintf(os.Stderr, "useage: mygit cat-file (-e | -p) <object>")
+			os.Exit(1)
+		}
+		checksum := flagSet.Arg(0)
 		obj, err := GetBlobObject(checksum)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%v", err)
@@ -67,10 +71,9 @@ type Object struct {
 	content []byte
 }
 
-
 func GetBlobObject(checksum string) (*Object, error) {
 	file, err := os.Open(fmt.Sprintf(".git/objects/%s/%s", checksum[:2], checksum[2:]))
-	
+
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +108,7 @@ func GetBlobObject(checksum string) (*Object, error) {
 
 	return &Object{
 		objType: string(objType),
-		size: size,
+		size:    size,
 		content: content,
 	}, nil
 }
