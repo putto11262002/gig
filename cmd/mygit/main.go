@@ -30,11 +30,12 @@ func main() {
 		flagSet := flag.NewFlagSet("cat-file", flag.ExitOnError)
 		printObjContent := flagSet.Bool("p", false, "pretty print (-e | -p) <object> content")
 		checkObjExist := flagSet.Bool("e", false, "check if <object> exists")
-		if *printObjContent && *checkObjExist || !(*printObjContent && *checkObjExist) {
+		flagSet.Parse(os.Args[2:])
+		if *printObjContent && *checkObjExist || (!*printObjContent && !*checkObjExist) {
 			fmt.Fprintf(os.Stderr, "useage: mygit cat-file (-e | -p) <object>")
 			os.Exit(1)
 		}
-		if flagSet.Arg(0) != "" {
+		if flagSet.Arg(0) == "" {
 			fmt.Fprintf(os.Stderr, "useage: mygit cat-file (-e | -p) <object>")
 			os.Exit(1)
 		}
