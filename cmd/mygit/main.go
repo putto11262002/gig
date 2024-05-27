@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -28,25 +30,26 @@ func main() {
 		}
 		fmt.Println("Initialized git directory")
 	case "cat-file":
+		usage := "useage: mygit cat-file (-e | -p) <object>"
 		flagSet := flag.NewFlagSet("cat-file", flag.ExitOnError)
 		printObjContent := flagSet.Bool("p", false, "pretty print (-e | -p) <object> content")
 		checkObjExist := flagSet.Bool("e", false, "check if <object> exists")
 		flagSet.Parse(os.Args[2:])
+		// Either one of the flags can be used, but not both simultaneously, nor can they both be absent
 		if *printObjContent && *checkObjExist || (!*printObjContent && !*checkObjExist) {
 			fmt.Fprintf(os.Stderr, "useage: mygit cat-file (-e | -p) <object>")
 			os.Exit(1)
 		}
 		if flagSet.Arg(0) == "" {
-			fmt.Fprintf(os.Stderr, "useage: mygit cat-file (-e | -p) <object>")
-			os.Exit(1)
+			ExitWithErrorMsg(usage)
 		}
 		checksum := flagSet.Arg(0)
-		obj, err := GetBlobObject([]byte(checksum))
+		var buffer bytes.Buffer
+		_, err := GetBlobObject([]byte(checksum), &buffer)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%v", err)
-			os.Exit(1)
+			ExitWithError(err)
 		}
-		fmt.Printf("%s", obj.content)
+		ExitWithFormatMsg("%s", buffer.String())
 	case "hash-object":
 		usage := "usage: git hash-object [-w] <file>"
 		flagSet := flag.NewFlagSet("hash-object", flag.ExitOnError)
@@ -61,8 +64,8 @@ func main() {
 		}
 		defer file.Close()
 		var buffer bytes.Buffer
-		FormatBlobObject(file, &buffer)
-		checksum, err := HashBlobObject(bytes.NewReader(buffer.Bytes()))
+		EncodeBlobObject(file, &buffer)
+		checksum, err := HashObject(bytes.NewReader(buffer.Bytes()))
 		if err != nil {
 			ExitWithFormatErrorMsg("failed  hashing data: %v", err)
 		}
@@ -135,7 +138,7 @@ func WriteObjectToStore(r io.Reader, checksum []byte) error {
 
 // WriteBlobObject reads data r, hash the data with hashFn and write the hash checksum to w.
 // If r and/or w implement [io.ReadCloser] and [io.WriteCloser] the caller are responsible for caller Close.
-func HashBlobObject(r io.Reader) ([]byte, error) {
+func HashObject(r io.Reader) ([]byte, error) {
 	hashFn := sha1.New()
 	chunk := make([]byte, 1024)
 	for {
@@ -161,7 +164,7 @@ func HashBlobObject(r io.Reader) ([]byte, error) {
 // FormatBlob format the blob object data as as specified in [Git Object Spec].
 // The caller is responsible for calling Close if r or/and w implements [io.ReadCloser] and [io.WriteCloser].
 // [Git Object Spec]: https://git-scm.com/book/en/v2/Git-Internals-Git-Objects
-func FormatBlobObject(r io.Reader, w io.Writer) error {
+func EncodeBlobObject(r io.Reader, w io.Writer) error {
 	buffer, err := io.ReadAll(r)
 	if err != nil {
 		return err
@@ -173,54 +176,43 @@ func FormatBlobObject(r io.Reader, w io.Writer) error {
 	return nil
 }
 
-type Object struct {
-	objType string
-	size    int
-	content []byte
+func ReadObject(w io.Writer, checksum []byte) error {
+	file, err := os.Open(fmt.Sprintf(".git/objects/%x/%x", checksum[:1], checksum[1:]))
+	if err != nil {
+		return fmt.Errorf("failed to open open file %w", err)
+	}
+	defer file.Close()
+	zlibR, err := zlib.NewReader(file)
+	if err != nil {
+		return err
+	}
+	defer zlibR.Close()
+	io.Copy(w, zlibR)
+	return nil
 }
 
-func GetBlobObject(checksum []byte) (*Object, error) {
-	file, err := os.Open(getObjFileName(checksum))
-
+func DecodeBlobObject(r io.Reader, w io.Writer) (int, error) {
+	wrappedR := bufio.NewReader(r)
+	prefix, err := wrappedR.ReadBytes(byte(' '))
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-
-	zlibReader, err := zlib.NewReader(file)
-	defer zlibReader.Close()
+	if !bytes.Equal(prefix, []byte("blob ")) {
+		return 0, errors.New("invalid format")
+	}
+	sizeBuffer, err := wrappedR.ReadBytes(byte(0))
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-
-	var buff bytes.Buffer
-	io.Copy(&buff, zlibReader)
-
-	objType, err := buff.ReadBytes(byte(' '))
-	if err != nil {
-		return nil, err
-	}
-	objType = bytes.Trim(objType, " ")
-
-	sizeByte, err := buff.ReadBytes(byte(0))
-	if err != nil {
-		return nil, err
-	}
-	sizeByte = bytes.Trim(sizeByte, "\000")
-	size, err := strconv.Atoi(string(sizeByte))
-	if err != nil {
-		return nil, err
-	}
-
-	buff.Truncate(size)
-	content := buff.Bytes()
-
-	return &Object{
-		objType: string(objType),
-		size:    size,
-		content: content,
-	}, nil
+	sizeBuffer = bytes.TrimRight(sizeBuffer, "\000")
+	io.Copy(w, wrappedR)
+	return strconv.Atoi(string(sizeBuffer))
 }
 
-func getObjFileName(checksum []byte) string {
-	return fmt.Sprintf(".git/objects/%s/%s", checksum[:2], checksum[2:])
+func GetBlobObject(checksum []byte, w io.Writer) (int, error) {
+	var buffer bytes.Buffer
+	if err := ReadObject(&buffer, checksum); err != nil {
+		return 0, fmt.Errorf("cannot read object: %w", err)
+	}
+	return DecodeBlobObject(&buffer, w)
 }
