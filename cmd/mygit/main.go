@@ -1,16 +1,20 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strconv"
+	"strings"
+
+	"github.com/codecrafters-io/git-starter-go/internal/object"
+	"github.com/codecrafters-io/git-starter-go/internal/util"
 )
 
 // Usage: your_git.sh <command> <arg1> <arg2> ...
@@ -30,51 +34,23 @@ func main() {
 		}
 		fmt.Println("Initialized git directory")
 	case "cat-file":
-		usage := "useage: mygit cat-file (-e | -p) <object>"
-		flagSet := flag.NewFlagSet("cat-file", flag.ExitOnError)
-		printObjContent := flagSet.Bool("p", false, "pretty print (-e | -p) <object> content")
-		checkObjExist := flagSet.Bool("e", false, "check if <object> exists")
-		flagSet.Parse(os.Args[2:])
-		// Either one of the flags can be used, but not both simultaneously, nor can they both be absent
-		if *printObjContent && *checkObjExist || (!*printObjContent && !*checkObjExist) {
-			fmt.Fprintf(os.Stderr, "useage: mygit cat-file (-e | -p) <object>")
-			os.Exit(1)
-		}
-		if flagSet.Arg(0) == "" {
-			ExitWithErrorMsg(usage)
-		}
-		checksum := flagSet.Arg(0)
-		var buffer bytes.Buffer
-		_, err := GetBlobObject([]byte(checksum), &buffer)
+		msg, err := CatFile()
 		if err != nil {
 			ExitWithError(err)
 		}
-		ExitWithFormatMsg("%s", buffer.String())
+		ExitWithMsg(msg)
 	case "hash-object":
-		usage := "usage: git hash-object [-w] <file>"
-		flagSet := flag.NewFlagSet("hash-object", flag.ExitOnError)
-		writeToDB := flagSet.Bool("w", false, "write the object into the object database")
-		flagSet.Parse(os.Args[2:])
-		if flagSet.Arg(0) == "" {
-			ExitWithErrorMsg(usage)
-		}
-		file, err := os.Open(flagSet.Arg(0))
+		msg, err := HashObject()
 		if err != nil {
-			ExitWithFormatErrorMsg("failed opening file: %v", err)
+			ExitWithError(err)
 		}
-		defer file.Close()
-		var buffer bytes.Buffer
-		EncodeBlobObject(file, &buffer)
-		checksum, err := HashObject(bytes.NewReader(buffer.Bytes()))
+		ExitWithMsg(msg)
+	case "ls-tree":
+		msg, err := LsTree()
 		if err != nil {
-			ExitWithFormatErrorMsg("failed  hashing data: %v", err)
+			ExitWithError(err)
 		}
-		if *writeToDB {
-			if err := WriteObjectToStore(bytes.NewReader(buffer.Bytes()), checksum); err != nil {
-				ExitWithFormatErrorMsg("failed to write object to file: %v", err)
-			}
-		}
-		ExitWithFormatMsg("%x\n", checksum)
+		ExitWithMsg(msg)
 	default:
 		ExitWithFormatErrorMsg("Unknown command %s", command)
 	}
@@ -119,100 +95,168 @@ func Init() error {
 	return nil
 }
 
-// WriteObjectToStore compress the object using the zlib compression format and write the object to the store with the file naming convention specified in https://git-scm.com/book/en/v2/Git-Internals-Git-Objects
-func WriteObjectToStore(r io.Reader, checksum []byte) error {
-	err := os.Mkdir(fmt.Sprintf(".git/objects/%x", checksum[:1]), 0744)
-	if err != nil {
-		return fmt.Errorf("failed to create object directory: %w", err)
+// TODO return if file open succesfully if flag is -e. There no need to read and parse the file
+func CatFile() (string, error) {
+	usage := "useage: mygit cat-file (-e | -p) <object>"
+	flagSet := flag.NewFlagSet("cat-file", flag.ExitOnError)
+	printObjContent := flagSet.Bool("p", false, "pretty print (-e | -p) <object> content")
+	checkObjExist := flagSet.Bool("e", false, "check if <object> exists")
+	flagSet.Parse(os.Args[2:])
+	// Either one of the flags can be used, but not both simultaneously, nor can they both be absent
+	if *printObjContent && *checkObjExist || (!*printObjContent && !*checkObjExist) {
+		return "", errors.New(usage)
 	}
-	file, err := os.OpenFile(fmt.Sprintf(".git/objects/%x/%x", checksum[:1], checksum[1:]), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to create object file: %w", err)
+	if flagSet.Arg(0) == "" {
+		return "", errors.New(usage)
 	}
-	defer file.Close()
-	zlibW := zlib.NewWriter(file)
-	defer zlibW.Close()
-	io.Copy(zlibW, r)
-	return nil
+	checksum, err := hex.DecodeString(flagSet.Arg(0))
+	if err != nil {
+		return "", err
+	}
+	buffer, err := object.ReadObject(checksum)
+	if err != nil {
+		return "", fmt.Errorf("failed to read object: %v", err)
+	}
+	bufferReader := bytes.NewReader(buffer)
+
+	// Read object type
+	_, err = util.ReadUntil(bufferReader, byte(' '))
+	if err != nil {
+		return "", err
+	}
+
+	// Read size (if you are going to use size remove the trailing null byte
+	_size, err := util.ReadUntil(bufferReader, byte(0))
+	_size = bytes.Trim(_size, "\000")
+	size, err := strconv.Atoi(string(_size))
+	if err != nil {
+		return "", err
+	}
+
+	if *printObjContent {
+		return fmt.Sprintf("%s", buffer[len(buffer)-size:]), nil
+	}
+
+	return "", nil
 }
 
-// WriteBlobObject reads data r, hash the data with hashFn and write the hash checksum to w.
-// If r and/or w implement [io.ReadCloser] and [io.WriteCloser] the caller are responsible for caller Close.
-func HashObject(r io.Reader) ([]byte, error) {
+func HashObject() (string, error) {
+	usage := "usage: git hash-object [-w] <file>"
+	flagSet := flag.NewFlagSet("hash-object", flag.ExitOnError)
+	writeToFile := flagSet.Bool("w", false, "write the object into the object database")
+	flagSet.Parse(os.Args[2:])
+	if flagSet.Arg(0) == "" {
+		return "", errors.New(usage)
+	}
+	file, err := os.Open(flagSet.Arg(0))
+	if err != nil {
+		return "", fmt.Errorf("failed opening file: %v", err)
+	}
+	defer file.Close()
+	buffer, err := io.ReadAll(file)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %v", err)
+	}
+	size := len(buffer)
 	hashFn := sha1.New()
-	chunk := make([]byte, 1024)
-	for {
-		n, err := r.Read(chunk)
-		if err != nil && err != io.EOF {
-			return nil, err
-		}
-		if n == 0 {
-			break
-		}
-		_, err = hashFn.Write(chunk[:n])
+	// Write header
+	header := []byte(fmt.Sprintf("blob %d\000", size))
+	hashFn.Write(header)
+	hashFn.Write(buffer)
+	checksum := hashFn.Sum(nil)
+
+	if *writeToFile {
+		err = os.Mkdir(fmt.Sprintf(".git/objects/%x", checksum[:1]), 0744)
 		if err != nil {
-			return nil, err
+			return "", fmt.Errorf("failed to create object directory: %v", err)
 		}
+		objectFile, err := os.OpenFile(fmt.Sprintf(".git/objects/%x/%x", checksum[:1], checksum[1:]), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+		if err != nil {
+			return "", fmt.Errorf("failed to create object file: %w", err)
+		}
+		defer objectFile.Close()
+		zlibW := zlib.NewWriter(objectFile)
+		defer zlibW.Close()
+		zlibW.Write(header)
+		zlibW.Write(buffer)
+	}
+	return fmt.Sprintf("%x\n", checksum), nil
+}
+
+func LsTree() (string, error) {
+	flagSet := flag.NewFlagSet("ls-tree", flag.ExitOnError)
+	nameOnly := flagSet.Bool("name-only", false, "list only file names")
+	flagSet.Parse(os.Args[2:])
+	usage := "usage: git ls-tree [options] <tree-ish>\n"
+	if flagSet.Arg(0) == "" {
+		var sBuilder strings.Builder
+		sBuilder.WriteString(usage)
+		flagSet.SetOutput(&sBuilder)
+		flagSet.PrintDefaults()
+		return "", errors.New(sBuilder.String())
+	}
+	checksumStr := flagSet.Arg(0)
+	checksum, err := hex.DecodeString(checksumStr)
+	if err != nil {
+		return "", err
+	}
+	buffer, err := object.ReadObject(checksum)
+	if err != nil {
+		return "", err
+	}
+	bufferReader := bytes.NewReader(buffer)
+	objectType, err := util.ReadUntil(bufferReader, byte(' '))
+	if err != nil {
+		return "", err
+	}
+	objectType = bytes.Trim(objectType, " ") // Remove trailing space
+
+	if !bytes.Equal([]byte("tree"), objectType) {
+		return "", errors.New("not a tree object")
+	}
+
+	// Read size (if you are going to use size remove the trailing null byte
+	_, err = util.ReadUntil(bufferReader, byte(0))
+
+	var sBuilder strings.Builder
+	for {
+		mode, err := util.ReadUntil(bufferReader, byte(' '))
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", err
+		}
+		mode = bytes.Trim(mode, " ")
+		name, err := util.ReadUntil(bufferReader, byte(0))
+		if err != nil {
+			return "", err
+		}
+		name = bytes.Trim(name, "\000")
+		checksum := make([]byte, 20)
+		_, err = bufferReader.Read(checksum)
+		if err != nil && err != io.EOF {
+			return "", err
+		}
+
+		if !*nameOnly {
+			sBuilder.Write(mode)
+			sBuilder.WriteByte(byte(' '))
+
+			sBuilder.Write(object.GetObjectTypeFromFileMode(mode))
+			sBuilder.WriteByte(byte(' '))
+
+			encodeChecksum := hex.NewEncoder(&sBuilder)
+			encodeChecksum.Write(checksum)
+			sBuilder.WriteByte(byte('\t'))
+		}
+		sBuilder.Write(name)
+		sBuilder.WriteByte(byte('\n'))
+
 		if err == io.EOF {
 			break
 		}
 	}
-	checksum := hashFn.Sum(nil)
-	return checksum, nil
-}
 
-// FormatBlob format the blob object data as as specified in [Git Object Spec].
-// The caller is responsible for calling Close if r or/and w implements [io.ReadCloser] and [io.WriteCloser].
-// [Git Object Spec]: https://git-scm.com/book/en/v2/Git-Internals-Git-Objects
-func EncodeBlobObject(r io.Reader, w io.Writer) error {
-	buffer, err := io.ReadAll(r)
-	if err != nil {
-		return err
-	}
-	// Write the blob header "blob <size>\000"
-	fmt.Fprintf(w, "blob %d\000", len(buffer))
-	// Write content
-	w.Write(buffer)
-	return nil
-}
-
-func ReadObject(w io.Writer, checksum []byte) error {
-	file, err := os.Open(fmt.Sprintf(".git/objects/%x/%x", checksum[:1], checksum[1:]))
-	if err != nil {
-		return fmt.Errorf("failed to open open file %w", err)
-	}
-	defer file.Close()
-	zlibR, err := zlib.NewReader(file)
-	if err != nil {
-		return err
-	}
-	defer zlibR.Close()
-	io.Copy(w, zlibR)
-	return nil
-}
-
-func DecodeBlobObject(r io.Reader, w io.Writer) (int, error) {
-	wrappedR := bufio.NewReader(r)
-	prefix, err := wrappedR.ReadBytes(byte(' '))
-	if err != nil {
-		return 0, err
-	}
-	if !bytes.Equal(prefix, []byte("blob ")) {
-		return 0, errors.New("invalid format")
-	}
-	sizeBuffer, err := wrappedR.ReadBytes(byte(0))
-	if err != nil {
-		return 0, err
-	}
-	sizeBuffer = bytes.TrimRight(sizeBuffer, "\000")
-	io.Copy(w, wrappedR)
-	return strconv.Atoi(string(sizeBuffer))
-}
-
-func GetBlobObject(checksum []byte, w io.Writer) (int, error) {
-	var buffer bytes.Buffer
-	if err := ReadObject(&buffer, checksum); err != nil {
-		return 0, fmt.Errorf("cannot read object: %w", err)
-	}
-	return DecodeBlobObject(&buffer, w)
+	return sBuilder.String(), nil
 }
