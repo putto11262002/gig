@@ -2,34 +2,59 @@ package object
 
 import (
 	"bytes"
-	"compress/zlib"
-	"fmt"
 	"io"
-	"os"
+
+	"github.com/codecrafters-io/git-starter-go/internal/common"
 )
 
-// GetObjectTypeFromFileMode `
-func GetObjectTypeFromFileMode(mode []byte) []byte {
-	if bytes.Equal(mode, []byte("040000")) {
-		return []byte("tree")
-	} else {
-		return []byte("blob")
-	}
+// Object represents a set of core functionalities a Git objects must implement.
+type Object interface {
+	// Return an [io.Reader] which reads raw object content. The data the reader returns is valid until the next modification to the object
+	// NewReader() io.Reader
+	// Type returns the type of the object
+	Type() string
+	// Size returns size of the object content in btyes
+	Size() int
+	// String returns the string representation of the object
+	String() string
 }
 
-// readObject reads and decompress the object that matches the checksum.
-// The raw object is returned as a slice of bytes
-func ReadObject(checksum []byte) ([]byte, error) {
-	file, err := os.Open(fmt.Sprintf(".git/objects/%x/%x", checksum[:1], checksum[1:]))
+// GenericObject represents a generic object.
+// It can represent any type objects that implements [Object] interface
+type GenericObject struct {
+	_type  string
+	buffer bytes.Buffer
+}
+
+type ObjHeader struct {
+	Size int
+	Type string
+}
+
+func (o *GenericObject) Type() string {
+	return o._type
+}
+
+func (o *GenericObject) Size() int {
+	return o.buffer.Len()
+}
+
+func (o *GenericObject) String() string {
+	return o.buffer.String()
+}
+
+func DecodeGenericObject(encodedObject common.EncodedObject) (*GenericObject, error) {
+	header, s, err := decodeObjectHeader(encodedObject)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-	zlibR, err := zlib.NewReader(file)
+	var buffer bytes.Buffer
+	_, err = io.Copy(&buffer, bytes.NewReader(encodedObject.Bytes()[s:]))
 	if err != nil {
 		return nil, err
 	}
-	defer zlibR.Close()
-	buffer, err := io.ReadAll(zlibR)
-	return buffer, nil
+	return &GenericObject{
+		buffer: buffer,
+		_type:  header.Type,
+	}, nil
 }

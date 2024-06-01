@@ -5,18 +5,20 @@ import (
 	"io"
 )
 
-// ReadTo reads r until the first end is encountered and return p which contains all the bytes read up until end (including end)
-// If EOF is reached before end is encountered EOF error is
-// returned and the p will contain the bytes that have been read so far
-func ReadUntil(r io.ByteReader, end byte) (p []byte, err error) {
+/*
+ReadUtil reads r until the first occurrence of end and returns p, which contains all the bytes read up until end (including end).
+If EOF is reached before encountering end, an EOF error is returned, and p will contain the bytes that have been read so far.
+*/
+func ReadUntil(r io.Reader, end []byte) (p []byte, err error) {
 	var buffer bytes.Buffer
+	var b []byte
 	for {
-		b, err := r.ReadByte()
+		_, err := r.Read(b)
 		if err != nil {
 			return buffer.Bytes(), err
 		}
-		buffer.WriteByte(b)
-		if b == end {
+		buffer.Write(b)
+		if bytes.Equal(b, end) {
 			return buffer.Bytes(), nil
 		}
 	}
