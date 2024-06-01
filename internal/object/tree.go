@@ -216,3 +216,12 @@ func DecodeTree(encodedTree common.EncodedObject) (*Tree, error) {
 
 	return tree, nil
 }
+
+func (tree *Tree) ListEntryNames() string {
+	var s strings.Builder
+	for _, entry := range tree.entries {
+		s.WriteString(entry.Name)
+		s.WriteString("\n")
+	}
+	return s.String()
+}

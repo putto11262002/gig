@@ -171,7 +171,7 @@ func HashObject() (string, error) {
 
 func LsTree() (string, error) {
 	flagSet := flag.NewFlagSet("ls-tree", flag.ExitOnError)
-	// nameOnly := flagSet.Bool("name-only", false, "list only file names")
+	nameOnly := flagSet.Bool("name-only", false, "list only file names")
 	flagSet.Parse(os.Args[2:])
 	usage := "usage: git ls-tree [options] <tree-ish>\n"
 	if flagSet.Arg(0) == "" {
@@ -195,6 +195,9 @@ func LsTree() (string, error) {
 		return "", err
 	}
 	tree, err := object.DecodeTree(encodedObject)
+	if *nameOnly {
+		return tree.ListEntryNames(), nil
+	}
 	return tree.String(), nil
 }
 

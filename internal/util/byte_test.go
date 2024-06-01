@@ -11,7 +11,7 @@ func TestReadUntil(t *testing.T) {
 	t.Run("read and return all the bytes until the first end is encounter", func(t *testing.T) {
 		r := bytes.NewReader([]byte("helloword"))
 		expected := []byte("hel")
-		end := byte('l')
+		end := []byte("l")
 		actual, err := ReadUntil(r, end)
 		if err != nil {
 			t.Fatalf("return non-nil error: %v", err)
@@ -23,7 +23,7 @@ func TestReadUntil(t *testing.T) {
 
 	t.Run("return an EOF error when EOF is encounter before end", func(t *testing.T) {
 		r := bytes.NewReader([]byte("helloword"))
-		end := byte('a')
+		end := []byte("a")
 		_, err := ReadUntil(r, end)
 		if err != io.EOF {
 			t.Fatalf("return non-EOF error: %v", err)
@@ -50,6 +50,6 @@ func BenchmarkReadUntil(b *testing.B) {
 	r := bytes.NewReader(data)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ReadUntil(r, byte(127))
+		ReadUntil(r, []byte{127})
 	}
 }

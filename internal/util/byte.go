@@ -11,7 +11,7 @@ If EOF is reached before encountering end, an EOF error is returned, and p will 
 */
 func ReadUntil(r io.Reader, end []byte) (p []byte, err error) {
 	var buffer bytes.Buffer
-	var b []byte
+	b := make([]byte, 1)
 	for {
 		_, err := r.Read(b)
 		if err != nil {
