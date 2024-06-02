@@ -13,8 +13,6 @@ type Object interface {
 	// NewReader() io.Reader
 	// Type returns the type of the object
 	Type() string
-	// Size returns size of the object content in btyes
-	Size() int
 	// String returns the string representation of the object
 	String() string
 }
@@ -29,6 +27,13 @@ type GenericObject struct {
 type ObjHeader struct {
 	Size int
 	Type string
+}
+
+func NewObjectHeader(t string, size int) *ObjHeader {
+	return &ObjHeader{
+		Type: t,
+		Size: size,
+	}
 }
 
 func (o *GenericObject) Type() string {

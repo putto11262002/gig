@@ -37,7 +37,7 @@ func (b *Blob) String() string {
 
 func EncodeBlob(blob *Blob) (common.EncodedObject, error) {
 	encodedBlob := common.NewGenericEncodedObject()
-	encodedHeader := encodeObjectHeader(blob)
+	encodedHeader := encodeObjectHeader(NewObjectHeader(blob.Type(), blob.buffer.Len()))
 	_, err := encodedBlob.Write(encodedHeader)
 	if err != nil {
 		return nil, err

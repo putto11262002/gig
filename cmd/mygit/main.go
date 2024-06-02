@@ -10,6 +10,7 @@ import (
 
 	"github.com/codecrafters-io/git-starter-go/internal/object"
 	"github.com/codecrafters-io/git-starter-go/internal/store"
+	"github.com/codecrafters-io/git-starter-go/plumbing"
 )
 
 // Usage: your_git.sh <command> <arg1> <arg2> ...
@@ -48,6 +49,12 @@ func main() {
 		ExitWithMsg(msg)
 	case "write-tree":
 		msg, err := WriteTree(os.Args[2:])
+		if err != nil {
+			ExitWithError(err)
+		}
+		ExitWithMsg(msg)
+	case "commit-tree":
+		msg, err := plumbing.CommitTree(os.Args[2:])
 		if err != nil {
 			ExitWithError(err)
 		}

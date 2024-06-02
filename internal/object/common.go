@@ -10,8 +10,8 @@ import (
 )
 
 // EncodeObjectHeader encodes the object header according the Git object header encoding format
-func encodeObjectHeader(obj Object) []byte {
-	return []byte(fmt.Sprintf("%s %d\000", obj.Type(), obj.Size()))
+func encodeObjectHeader(header *ObjHeader) []byte {
+	return []byte(fmt.Sprintf("%s %d\000", header.Type, header.Size))
 }
 
 // DecodeObjectHeader decodes [ObjHeader] from an encoded object. s is the offset first byte of the object content

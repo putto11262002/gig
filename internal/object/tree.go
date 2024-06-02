@@ -69,17 +69,17 @@ func (t *Tree) Type() string {
 	return "tree"
 }
 
-// Size return the size of the encoded tree object content (entries).
-// The size is not memonized. It is calculate every time the function is called,
-// which is a O(n) operation.
-// TODO: perhaps store size variable in the stsuct and update it every time a new entry is added
-func (t *Tree) Size() int {
-	var size int
-	for _, entry := range t.entries {
-		size += len(encodeTreeEntry(&entry))
-	}
-	return size
-}
+// // Size return the size of the encoded tree object content (entries).
+// // The size is not memonized. It is calculate every time the function is called,
+// // which is a O(n) operation.
+// // TODO: perhaps store size variable in the stsuct and update it every time a new entry is added
+// func (t *Tree) Size() int {
+// 	var size int
+// 	for _, entry := range t.entries {
+// 		size += len(encodeTreeEntry(&entry))
+// 	}
+// 	return size
+// }
 
 func (t *Tree) AppendEntry(entry TreeEntry) {
 	t.entries = append(t.entries, entry)
@@ -156,14 +156,29 @@ func WriteTree(fSys fs.FS, store store.Store) ([]byte, error) {
 	return checksum, nil
 }
 
-func EncodeTree(tree *Tree) (common.EncodedObject, error) {
-	encodedTree := common.NewGenericEncodedObject()
-	encodedTree.Write(encodeObjectHeader(tree))
+func encodeTreeContent(tree *Tree) ([]byte, error) {
+	var buffer bytes.Buffer
 	for _, entry := range tree.entries {
-		if _, err := encodedTree.Write(encodeTreeEntry(&entry)); err != nil {
+		if _, err := buffer.Write(encodeTreeEntry(&entry)); err != nil {
 			return nil, err
 		}
 	}
+	return buffer.Bytes(), nil
+}
+
+func EncodeTree(tree *Tree) (common.EncodedObject, error) {
+	encodedTree := common.NewGenericEncodedObject()
+	encodedContent, err := encodeTreeContent(tree)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := encodedTree.Write(encodeObjectHeader(NewObjectHeader(tree.Type(), len(encodedContent)))); err != nil {
+		return nil, err
+	}
+	if _, err := encodedTree.Write(encodedContent); err != nil {
+		return nil, err
+	}
+
 	return encodedTree, nil
 }
 
@@ -171,7 +186,7 @@ func DecodeTree(encodedTree common.EncodedObject) (*Tree, error) {
 	tree := newTree()
 	header, s, err := decodeObjectHeader(encodedTree)
 	if header.Type != "tree" {
-		return nil, errors.New("In valid tree object")
+		return nil, errors.New("Invalid tree object")
 	}
 	if err != nil {
 		return nil, err
