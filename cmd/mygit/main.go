@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	goit "github.com/codecrafters-io/git-starter-go"
 	"github.com/codecrafters-io/git-starter-go/internal/object"
 	"github.com/codecrafters-io/git-starter-go/internal/store"
 	"github.com/codecrafters-io/git-starter-go/plumbing"
@@ -15,7 +16,6 @@ import (
 
 // Usage: your_git.sh <command> <arg1> <arg2> ...
 func main() {
-
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: mygit <command> [<args>...]\n")
 		os.Exit(1)
@@ -59,6 +59,8 @@ func main() {
 			ExitWithError(err)
 		}
 		ExitWithMsg(msg)
+	case "clone":
+		goit.Clone(os.Args[2:])
 	default:
 		ExitWithFormatErrorMsg("Unknown command %s", command)
 	}

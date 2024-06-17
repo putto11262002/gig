@@ -2,10 +2,14 @@ package common
 
 import (
 	"bytes"
-	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"io"
+
+	"github.com/codecrafters-io/git-starter-go/internal/hash"
+)
+
+const (
+	CHECKSUM_LEN = 20
 )
 
 // Checksum represents a 20 bytes sha1 hash checksum of an object
@@ -23,11 +27,9 @@ func (c Checksum) Equal(o Checksum) bool {
 	return bytes.Equal(c, o)
 }
 
-// HashObject hash the encoded object with the sha1 hash algorithm
-func HashObject(obj EncodedObject) ([]byte, error) {
-	hashFn := sha1.New()
-	_, err := io.Copy(hashFn, obj.NewReader())
-	if err != nil {
+func HashObject(objectType ObjectType, content []byte) ([]byte, error) {
+	hashFn := hash.New(hash.SHA1)
+	if err := EncodeObject(objectType, content, hashFn); err != nil {
 		return nil, err
 	}
 	return hashFn.Sum(nil), nil

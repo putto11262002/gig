@@ -178,18 +178,17 @@ func EncodeTree(tree *Tree) (common.EncodedObject, error) {
 	if _, err := encodedTree.Write(encodedContent); err != nil {
 		return nil, err
 	}
-
 	return encodedTree, nil
 }
 
 func DecodeTree(encodedTree common.EncodedObject) (*Tree, error) {
 	tree := newTree()
 	header, s, err := decodeObjectHeader(encodedTree)
-	if header.Type != "tree" {
-		return nil, errors.New("Invalid tree object")
-	}
 	if err != nil {
 		return nil, err
+	}
+	if header.Type != "tree" {
+		return nil, errors.New("Invalid tree object")
 	}
 	contentReader := bytes.NewReader(encodedTree.Bytes()[s:])
 	for {
